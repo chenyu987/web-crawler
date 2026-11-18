@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "webcrawler"
+version = "0.1.0"
+description = "Crawl a website and save its pages, text, links, images, videos, audio and documents for offline use."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "requests>=2.28",
+    "beautifulsoup4>=4.11",
+    "lxml>=4.9",
+]
+
+[project.optional-dependencies]
+video = ["yt-dlp>=2024.1.1"]
+render = ["playwright>=1.40"]
+all = ["yt-dlp>=2024.1.1", "playwright>=1.40"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+webcrawler = "webcrawler.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["webcrawler*"]
