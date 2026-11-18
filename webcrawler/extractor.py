@@ -47,6 +47,7 @@ class PageData:
     embeds: List[str] = field(default_factory=list)              # youtube etc.
     json_ld: List[object] = field(default_factory=list)
     images: List[Dict[str, str]] = field(default_factory=list)   # image + its description
+    products: List[Dict] = field(default_factory=list)           # e-commerce product data
     base_url: str = ""
 
 
@@ -233,6 +234,15 @@ def extract(html: str, url: str) -> PageData:
 
     # ---- images with their descriptions -------------------------------------
     data.images = _image_descriptions(soup, norm)
+
+    # ---- products (schema.org / og:product) -----------------------------------
+    from .products import extract_products
+
+    data.products = extract_products(soup, data.json_ld, data.meta, norm)
+    for prod in data.products:
+        prod["url"] = prod["url"] or url
+        for img_url in prod["images"]:
+            add_asset(img_url, "images", "product")
 
     # ---- text ---------------------------------------------------------------
     data.headings = [

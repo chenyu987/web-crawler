@@ -48,6 +48,7 @@ SITE = {
           <h3>Water Lilies, 1906</h3><p>Claude Monet. Oil on canvas. Part of the famous series.</p></div>
         <figure><img data-src="/img/og.png" alt="Bust"><figcaption>Marble bust, Roman, 2nd century</figcaption></figure>
         </main></body></html>""",
+    "shop.html": None,  # filled below
     "robots.txt": "User-agent: *\nDisallow:\n",
 }
 
@@ -55,6 +56,7 @@ SITE = {
 @pytest.fixture(scope="module")
 def site(tmp_path_factory):
     root = tmp_path_factory.mktemp("site")
+    SITE["shop.html"] = SHOP_JSONLD
     for rel, content in SITE.items():
         p = root / rel
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -162,3 +164,67 @@ def test_image_descriptions(site, tmp_path):
     assert rows["Bust"]["caption"] == "Marble bust, Roman, 2nd century"
     md = next((out / "text").rglob("collection.md")).read_text()
     assert "../../assets/images/" in md  # markdown points at the local image files
+
+
+SHOP_JSONLD = """<html><head><title>Linen Shirt</title>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[
+ {"@type":"BreadcrumbList","itemListElement":[]},
+ {"@type":"ProductGroup","name":"Linen Shirt","brand":{"@type":"Brand","name":"Acme"},
+  "description":"<p>Breathable <b>linen</b> shirt.</p>","productGroupID":"LS-1",
+  "image":["/img/a.png",{"@type":"ImageObject","url":"/img/b.png"}],
+  "aggregateRating":{"ratingValue":"4.6","reviewCount":"128"},
+  "offers":{"@type":"AggregateOffer","lowPrice":"49.00","highPrice":"59.00","priceCurrency":"USD"},
+  "hasVariant":[
+   {"@type":"Product","name":"Linen Shirt - S","sku":"LS-1-S","size":"S","image":"/img/poster.png",
+    "offers":{"@type":"Offer","price":"49.00","availability":"https://schema.org/InStock"}},
+   {"@type":"Product","name":"Linen Shirt - L","sku":"LS-1-L","size":"L",
+    "offers":{"@type":"Offer","price":"59.00","availability":"https://schema.org/OutOfStock"}}]}]}
+</script></head><body><h1>Linen Shirt</h1></body></html>"""
+
+SHOP_MICRODATA = """<html><body><div itemscope itemtype="https://schema.org/Product">
+ <h1 itemprop="name">Ceramic Mug</h1><img itemprop="image" src="/img/og.png">
+ <span itemprop="brand" itemscope itemtype="https://schema.org/Brand"><span itemprop="name">Potter</span></span>
+ <div itemprop="offers" itemscope itemtype="https://schema.org/Offer">
+  <meta itemprop="priceCurrency" content="EUR"><span itemprop="price" content="12.50">€12,50</span>
+  <link itemprop="availability" href="https://schema.org/InStock"></div>
+ <p itemprop="description">Handmade mug.</p></div></body></html>"""
+
+SHOP_META = """<html><head><meta property="og:type" content="product">
+<meta property="og:title" content="Tote Bag"><meta property="og:image" content="/img/bg.png">
+<meta property="product:price:amount" content="20"><meta property="product:price:currency" content="GBP">
+</head><body></body></html>"""
+
+
+def test_products_jsonld_with_variants():
+    d = extract(SHOP_JSONLD, "http://shop/p/linen")
+    assert len(d.products) == 1  # variants are not counted as separate products
+    p = d.products[0]
+    assert (p["name"], p["brand"], p["price"], p["high_price"], p["currency"]) == \
+        ("Linen Shirt", "Acme", "49.00", "59.00", "USD")
+    assert p["rating"] == "4.6" and p["review_count"] == "128"
+    assert p["description"] == "Breathable linen shirt."
+    assert [v["sku"] for v in p["variants"]] == ["LS-1-S", "LS-1-L"]
+    assert p["variants"][1]["availability"] == "OutOfStock"
+    assert p["images"] == ["http://shop/img/a.png", "http://shop/img/b.png", "http://shop/img/poster.png"]
+    # product images are queued for download even if no <img> shows them
+    assert "http://shop/img/poster.png" in {a.url for a in d.assets}
+
+
+def test_products_microdata_and_meta():
+    p = extract(SHOP_MICRODATA, "http://shop/mug").products[0]
+    assert (p["name"], p["brand"], p["price"], p["currency"], p["availability"]) == \
+        ("Ceramic Mug", "Potter", "12.50", "EUR", "InStock")
+    assert p["images"] == ["http://shop/img/og.png"]
+    p = extract(SHOP_META, "http://shop/tote").products[0]
+    assert (p["name"], p["price"], p["currency"]) == ("Tote Bag", "20", "GBP")
+
+
+def test_products_csv(site, tmp_path):
+    out = tmp_path / "out4"
+    cfg = CrawlConfig(start_urls=[site + "/shop.html"], output_dir=str(out), delay=0,
+                      max_depth=0, streaming_videos=False)
+    Crawler(cfg).run()
+    rows = list(csv.DictReader(open(out / "data" / "products.csv", encoding="utf-8-sig")))
+    assert rows[0]["name"] == "Linen Shirt" and rows[0]["price"] == "49.00"
+    local = rows[0]["local_images"].split(" | ")
+    assert len(local) == 3 and all((out / p).exists() for p in local)

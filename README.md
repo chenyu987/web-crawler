@@ -86,6 +86,8 @@ downloads/example.com/
 └── data/
     ├── pages.jsonl       # 每页一行：url、标题、描述、meta、标题层级、JSON-LD、全文
     ├── links.csv         # 所有链接：来源页、目标 URL、链接文字、是否站内
+    ├── products.csv      # 购物网站：每个商品一行（名称、品牌、价格、库存、SKU、评分、描述、规格、本地图片）
+    ├── products.jsonl    # 同上，JSON 格式（含每个尺码/颜色变体和多个报价）
     ├── images.csv        # 每张图片 + 对应的文字介绍（alt、图注、所在卡片的标题和说明、所在页面）
     ├── images.jsonl      # 同上，JSON 格式
     ├── assets.csv        # 所有已下载文件：URL、类型、本地路径、大小、来源页
@@ -111,6 +113,31 @@ downloads/example.com/
 # 例：只扒某个博物馆的藏品栏目，只要图片
 webcrawler https://museum.example.org/collection/ --scope prefix -t images -n 2000
 ```
+
+### 购物网站：商品图片 + 全部商品信息
+
+大部分购物网站（Shopify、WooCommerce、Magento，以及多数品牌官网）为了上 Google 购物，会在商品页里放一段标准格式的商品数据（schema.org Product）。工具会自动读取这段数据，还会读取 microdata 和 `og:product` 标签作为补充，整理成 `data/products.csv`：
+
+| 列 | 内容 |
+|---|---|
+| `name` / `brand` / `category` | 商品名、品牌、分类 |
+| `price` / `high_price` / `currency` | 价格（多个规格价格不同时给出价格区间）和币种 |
+| `availability` / `condition` | 是否有货（InStock/OutOfStock…）、全新/二手 |
+| `sku` / `mpn` / `gtin` | 货号、型号、条形码 |
+| `color` / `size` / `material` / `properties` | 颜色、尺码、材质和其他参数 |
+| `rating` / `review_count` | 评分和评论数 |
+| `description` | 商品描述（已去掉 HTML 标签） |
+| `local_images` | **这件商品的所有图片在本地的路径**（包括页面上没直接显示的图） |
+| `variants` | 每个尺码/颜色变体各自的 SKU、价格、库存和图片 |
+
+同一件商品出现在多个页面里也只记一次。
+
+```bash
+# 例：扒一个店铺的全部商品
+webcrawler https://shop.example.com -n 3000 -t images
+```
+
+注意：如果网站没有放这段标准商品数据，商品信息只能退回到 `images.csv` 的“图片 + 周围文字”。淘宝、京东、亚马逊这类大平台有登录墙和反爬机制，一般扒不全，也不建议去扒。
 
 用 Python 读取数据：
 

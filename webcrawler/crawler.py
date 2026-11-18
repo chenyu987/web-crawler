@@ -130,6 +130,7 @@ class Crawler:
         self.css_files: List[Tuple[str, str]] = []
         self._lock = threading.Lock()
         self._stop = False
+        self._n_products = 0
 
     # ------------------------------------------------------------------ #
     # scope helpers
@@ -364,6 +365,7 @@ class Crawler:
             "text": data.text, "local_html": res["local_html"], "local_text": res["local_text"],
             "n_links": len(data.links), "n_assets": len(data.assets), "embeds": data.embeds,
             "images": data.images,
+            "products": data.products,
         })
         log.info("[%d] %s  — %s", len(self.pages), final, (data.title or "")[:60])
         for link in data.links:
@@ -638,6 +640,7 @@ class Crawler:
         with open(os.path.join(data_dir, "images.jsonl"), "w", encoding="utf-8") as fh:
             for r in img_rows:
                 fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+        self._write_products(data_dir)
         _write_csv(os.path.join(data_dir, "embeds.csv"), ["url", "found_on", "local_path"],
                    [(u, f, self.url_map.get(u, "")) for u, f in self.embeds.items()])
         _write_csv(os.path.join(data_dir, "errors.csv"), ["url", "error"], self.errors)
@@ -656,6 +659,7 @@ class Crawler:
             "links": len(self.links),
             "unique_links": len({l[1] for l in self.links}),
             "assets": by_cat,
+            "products": self._n_products,
             "embedded_videos": len(self.embeds),
             "errors": len(self.errors),
             "output_dir": self.out,
@@ -664,6 +668,39 @@ class Crawler:
             json.dump(summary, fh, ensure_ascii=False, indent=2)
         self._write_index(summary)
         return summary
+
+    def _write_products(self, data_dir: str) -> None:
+        """data/products.csv + products.jsonl: one row per product, images saved locally."""
+        rows, seen = [], set()
+        for p in self.pages:
+            for prod in p.get("products", []):
+                key = (prod.get("sku") or prod.get("url"), prod.get("name"))
+                if key in seen:  # same product listed on several pages
+                    continue
+                seen.add(key)
+                local = [self.url_map[u] for u in prod["images"] if u in self.url_map]
+                rows.append({**prod, "page_url": p["final_url"], "page_title": p["title"],
+                             "local_images": local})
+        self._n_products = len(rows)
+        if not rows:
+            return
+        with open(os.path.join(data_dir, "products.jsonl"), "w", encoding="utf-8") as fh:
+            for r in rows:
+                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+        cols = ["name", "brand", "price", "high_price", "currency", "availability", "condition",
+                "sku", "mpn", "gtin", "category", "color", "size", "material", "rating",
+                "review_count", "description", "url", "local_images", "images", "variants",
+                "properties", "source", "page_title"]
+
+        def cell(v):
+            if isinstance(v, list) and all(isinstance(x, str) for x in v):
+                return " | ".join(v)
+            if isinstance(v, (list, dict)):
+                return json.dumps(v, ensure_ascii=False) if v else ""
+            return v
+
+        _write_csv(os.path.join(data_dir, "products.csv"), cols,
+                   [tuple(cell(r.get(c, "")) for c in cols) for r in rows])
 
     def _write_index(self, summary: dict) -> None:
         import html as h
@@ -705,9 +742,9 @@ code{{background:#f3f3f3;padding:1px 4px}}</style></head><body>
 <p>Start: {", ".join(f'<a href="{h.escape(u)}">{h.escape(u)}</a>' for u in self.start_urls)}<br>
 Finished {summary["finished_at"]} in {summary["elapsed_seconds"]}s ·
 {summary["pages"]} pages · {sum(c["count"] for c in summary["assets"].values())} files ·
-{summary["unique_links"]} unique links · {summary["errors"]} errors</p>
+{summary["unique_links"]} unique links · {summary["products"]} products · {summary["errors"]} errors</p>
 <p>Data: <code>data/pages.jsonl</code> · <code>data/links.csv</code> · <code>data/assets.csv</code> ·
-<code>data/embeds.csv</code> · <code>data/errors.csv</code> · <code>manifest.json</code></p>
+<code>data/images.csv</code> · <code>data/products.csv</code> · <code>data/embeds.csv</code> · <code>data/errors.csv</code> · <code>manifest.json</code></p>
 <h2>Files</h2>{"".join(sections) or "<p>none</p>"}
 <h2>Embedded / streaming videos ({len(self.embeds)})</h2><ul>{embeds}</ul>
 <h2>Pages ({len(self.pages)})</h2><table>{"".join(rows)}</table>

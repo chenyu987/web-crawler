@@ -229,6 +229,8 @@ def main(argv=None) -> int:
               "{unique_links} unique links, {errors} errors".format(files=files, **summary))
         for cat, c in sorted(summary["assets"].items()):
             print(f"   {cat:<10} {c['count']:>6}  ({c['bytes'] / 1024 / 1024:.1f} MB)")
+        if summary.get("products"):
+            print(f"   products found: {summary['products']}  (data/products.csv)")
         if summary["embedded_videos"]:
             print(f"   embedded videos found: {summary['embedded_videos']}")
         index = os.path.join(summary["output_dir"], "index.html")
