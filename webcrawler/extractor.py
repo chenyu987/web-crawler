@@ -46,6 +46,7 @@ class PageData:
     assets: List[AssetRef] = field(default_factory=list)
     embeds: List[str] = field(default_factory=list)              # youtube etc.
     json_ld: List[object] = field(default_factory=list)
+    images: List[Dict[str, str]] = field(default_factory=list)   # image + its description
     base_url: str = ""
 
 
@@ -230,6 +231,9 @@ def extract(html: str, url: str) -> PageData:
         elif looks_like_page(nu):
             data.page_links.append(nu)
 
+    # ---- images with their descriptions -------------------------------------
+    data.images = _image_descriptions(soup, norm)
+
     # ---- text ---------------------------------------------------------------
     data.headings = [
         {"level": h.name, "text": h.get_text(" ", strip=True)}
@@ -240,6 +244,74 @@ def extract(html: str, url: str) -> PageData:
     data.markdown = html_to_markdown(content, base)
     data.text = _plain_text(content)
     return data
+
+
+def _best_src(img: Tag) -> Optional[str]:
+    """Largest candidate from srcset, falling back to src / lazy-load attrs."""
+    best, best_w = None, -1.0
+    for attr in ("srcset", "data-srcset"):
+        for part in (img.get(attr) or "").split(","):
+            bits = part.strip().split()
+            if not bits:
+                continue
+            w = 1.0
+            if len(bits) > 1:
+                try:
+                    w = float(bits[1].rstrip("wx"))
+                except ValueError:
+                    pass
+            if w > best_w:
+                best, best_w = bits[0], w
+    if best:
+        return best
+    for attr in ("data-src", "data-original", "data-lazy-src", "src"):
+        if img.get(attr) and not img[attr].startswith("data:"):
+            return img[attr]
+    return None
+
+
+def _clean(t: str, limit: int = 2000) -> str:
+    return re.sub(r"\s+", " ", t or "").strip()[:limit]
+
+
+def _image_descriptions(soup: BeautifulSoup, norm) -> List[Dict[str, str]]:
+    """For every <img>: alt, title, caption and the nearby description text.
+
+    Works for typical gallery / museum / product pages where the text that
+    describes an image is in a <figcaption>, or in the card/section around it.
+    """
+    out, seen = [], set()
+    for img in soup.find_all("img"):
+        url = norm(_best_src(img))
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        caption = ""
+        fig = img.find_parent("figure")
+        if fig and fig.find("figcaption"):
+            caption = _clean(fig.find("figcaption").get_text(" ", strip=True))
+        # nearest ancestor that carries some real text = the "card" around the image
+        context, heading = "", ""
+        node = img.parent
+        for _ in range(6):
+            if node is None or node.name in ("body", "html", "main"):
+                break
+            txt = _clean(node.get_text(" ", strip=True), 3000)
+            if len(txt) >= 40:
+                context = txt
+                h = node.find(re.compile(r"^h[1-6]$"))
+                heading = _clean(h.get_text(" ", strip=True), 300) if h else ""
+                break
+            node = node.parent
+        out.append({
+            "url": url,
+            "alt": _clean(img.get("alt", ""), 500),
+            "title": _clean(img.get("title", ""), 500),
+            "caption": caption,
+            "heading": heading,
+            "context": context,
+        })
+    return out
 
 
 # --------------------------------------------------------------------------- #

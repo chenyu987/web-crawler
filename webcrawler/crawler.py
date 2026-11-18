@@ -363,6 +363,7 @@ class Crawler:
             "meta": data.meta, "headings": data.headings, "json_ld": data.json_ld,
             "text": data.text, "local_html": res["local_html"], "local_text": res["local_text"],
             "n_links": len(data.links), "n_assets": len(data.assets), "embeds": data.embeds,
+            "images": data.images,
         })
         log.info("[%d] %s  — %s", len(self.pages), final, (data.title or "")[:60])
         for link in data.links:
@@ -570,6 +571,23 @@ class Crawler:
                     st.string = self._rewrite_css(st.string, base, rel)
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(str(soup))
+        md_link = re.compile(r"(\]\()([^)\s]+)(\))")
+        for p in self.pages:
+            path = os.path.join(self.out, p["local_text"])
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    md = fh.read()
+            except OSError:
+                continue
+
+            def sub_md(m, rel=p["local_text"]):
+                target = self.url_map.get(m.group(2))
+                if not target:
+                    return m.group(0)
+                return m.group(1) + relative_link(rel, target) + m.group(3)
+
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(md_link.sub(sub_md, md))
         for css_url, rel in self.css_files:
             path = os.path.join(self.out, rel)
             try:
@@ -603,6 +621,23 @@ class Crawler:
         _write_csv(os.path.join(data_dir, "assets.csv"),
                    ["url", "category", "local_path", "size", "content_type", "found_on", "status"],
                    [tuple(asdict(a).values()) for a in self.assets])
+        img_rows = []
+        for p in self.pages:
+            for im in p.get("images", []):
+                img_rows.append({
+                    "local_path": self.url_map.get(im["url"], ""), **im,
+                    "page_title": p["title"], "page_url": p["final_url"],
+                    "page_description": p["description"],
+                })
+        _write_csv(os.path.join(data_dir, "images.csv"),
+                   ["local_path", "url", "alt", "title", "caption", "heading", "context",
+                    "page_title", "page_url", "page_description"],
+                   [tuple(r[k] for k in ("local_path", "url", "alt", "title", "caption", "heading",
+                                         "context", "page_title", "page_url", "page_description"))
+                    for r in img_rows])
+        with open(os.path.join(data_dir, "images.jsonl"), "w", encoding="utf-8") as fh:
+            for r in img_rows:
+                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
         _write_csv(os.path.join(data_dir, "embeds.csv"), ["url", "found_on", "local_path"],
                    [(u, f, self.url_map.get(u, "")) for u, f in self.embeds.items()])
         _write_csv(os.path.join(data_dir, "errors.csv"), ["url", "error"], self.errors)

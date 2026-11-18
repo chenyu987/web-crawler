@@ -2,7 +2,23 @@
 
 给一个网址，把整个网站扒下来：网页（可离线浏览）、正文文字（Markdown）、所有链接、图片、视频、音频、文档（PDF/Word/Excel/PPT…）、压缩包、CSS/JS/字体，以及嵌入的 YouTube / Bilibili / Vimeo / HLS 视频，最后整理成方便二次利用的数据文件（JSONL / CSV）。
 
-## 安装
+## 最简单的用法：双击运行（Mac / Windows 都支持）
+
+1. 安装 Python 3（只需要装一次）：去 <https://www.python.org/downloads/> 下载安装。**Windows 安装时一定要勾选 “Add python.exe to PATH”。**
+2. 下载本项目：在 GitHub 页面点 **Code → Download ZIP** 并解压，或者用 `git clone`。
+3. 双击启动文件：
+   - **Mac**：`start.command`。第一次如果提示“无法验证开发者”，就右键 → 打开；也可以在终端里运行 `bash start.command`。
+   - **Windows**：`start.bat`。如果弹出 SmartScreen 拦截，点“更多信息 → 仍要运行”。
+4. 第一次运行会自动安装依赖，大约需要 1 分钟。之后它会问你：
+   - 网址
+   - 要扒整个网站，还是只扒这一页
+   - 最多扒多少页
+
+   扒完会自动用浏览器打开结果汇总页。
+
+文件默认保存在项目文件夹里的 `downloads/<域名>/`。
+
+## 命令行安装（进阶）
 
 ```bash
 git clone https://github.com/chenyu987/web-crawler.git
@@ -48,6 +64,9 @@ webcrawler https://site.com --cookies-file cookies.txt
 # 视频限制在 720p，跳过超过 500MB 的单个文件
 webcrawler https://site.com --video-quality 720 --max-file-size 500MB
 
+# 不带网址运行 = 交互模式（会提示你输入）
+webcrawler
+
 # 也可以用 python -m 运行
 python -m webcrawler https://example.com -o my_output
 ```
@@ -67,9 +86,30 @@ downloads/example.com/
 └── data/
     ├── pages.jsonl       # 每页一行：url、标题、描述、meta、标题层级、JSON-LD、全文
     ├── links.csv         # 所有链接：来源页、目标 URL、链接文字、是否站内
+    ├── images.csv        # 每张图片 + 对应的文字介绍（alt、图注、所在卡片的标题和说明、所在页面）
+    ├── images.jsonl      # 同上，JSON 格式
     ├── assets.csv        # 所有已下载文件：URL、类型、本地路径、大小、来源页
     ├── embeds.csv        # 发现的嵌入/流媒体视频
     └── errors.csv        # 失败的 URL 和原因
+```
+
+### 图片和文字介绍对应起来（适合博物馆、画廊、商品类网站）
+
+`data/images.csv` 里每张图片占一行，可以直接用 Excel 打开：
+
+| 列 | 内容 |
+|---|---|
+| `local_path` | 本地图片文件（如果网站提供了多种尺寸，会选最大的那张） |
+| `alt` / `title` | 图片自带的描述 |
+| `caption` | `<figure>` 的图注 |
+| `heading` / `context` | 图片所在“卡片/区块”的标题和介绍文字，比如作品名、作者、年代、材质 |
+| `page_title` / `page_url` / `page_description` | 所在页面（例如作品详情页） |
+
+另外，`text/` 下的 Markdown 已经把图片链接改成了本地文件，用 Typora、Obsidian 或 VS Code 打开就能图文对照阅读。
+
+```bash
+# 例：只扒某个博物馆的藏品栏目，只要图片
+webcrawler https://museum.example.org/collection/ --scope prefix -t images -n 2000
 ```
 
 用 Python 读取数据：

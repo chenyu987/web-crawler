@@ -23,7 +23,7 @@ SITE = {
         <h1>Welcome</h1><p>Hello <b>world</b>, this is the home page with enough text to count as
         main content for the extractor. Lorem ipsum dolor sit amet, consectetur adipiscing elit,
         sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
-        <ul><li><a href="/about.html">About</a></li><li><a href="sub/">Sub</a></li>
+        <ul><li><a href="/about.html">About</a></li><li><a href="/collection.html">Collection</a></li><li><a href="sub/">Sub</a></li>
         <li><a href="/files/report.pdf">Report</a></li>
         <li><a href="https://external.example.org/x">External</a></li></ul>
         <img src="/img/a.png" srcset="/img/a.png 1x, /img/b.png 2x" alt="A">
@@ -43,6 +43,11 @@ SITE = {
     "media/sound.mp3": b"ID3" + b"0" * 500,
     "files/report.pdf": b"%PDF-1.4 fake",
     "files/data.csv": "a,b\n1,2\n",
+    "collection.html": """<html><head><title>Collection</title></head><body><main>
+        <div class="card"><img src="/img/a.png" srcset="/img/a.png 400w, /img/b.png 1200w" alt="Water Lilies">
+          <h3>Water Lilies, 1906</h3><p>Claude Monet. Oil on canvas. Part of the famous series.</p></div>
+        <figure><img data-src="/img/og.png" alt="Bust"><figcaption>Marble bust, Roman, 2nd century</figcaption></figure>
+        </main></body></html>""",
     "robots.txt": "User-agent: *\nDisallow:\n",
 }
 
@@ -101,7 +106,7 @@ def test_full_crawl(site, tmp_path):
                       streaming_videos=False, workers=4)
     summary = Crawler(cfg).run()
 
-    assert summary["pages"] == 4  # index, about, sub/, sub/deeper
+    assert summary["pages"] == 5  # index, about, collection, sub/, sub/deeper
     cats = summary["assets"]
     assert cats["images"]["count"] == 5
     assert cats["videos"]["count"] == 1 and cats["audio"]["count"] == 1
@@ -125,7 +130,7 @@ def test_full_crawl(site, tmp_path):
     md = (out / "text" / host / "index.md").read_text()
     assert "Welcome" in md
     pages = [json.loads(l) for l in (out / "data" / "pages.jsonl").read_text().splitlines()]
-    assert {p["title"] for p in pages} == {"Home", "About", "Sub", "Deeper"}
+    assert {p["title"] for p in pages} == {"Home", "About", "Collection", "Sub", "Deeper"}
     with open(out / "data" / "links.csv", encoding="utf-8-sig") as fh:
         links = list(csv.DictReader(fh))
     assert any(l["url"] == "https://external.example.org/x" and l["internal"] == "False" for l in links)
@@ -140,3 +145,20 @@ def test_type_filter_and_depth(site, tmp_path):
     assert summary["pages"] == 1
     assert set(summary["assets"]) == {"documents"}
     assert not (out / "assets" / "images").exists()
+
+
+def test_image_descriptions(site, tmp_path):
+    out = tmp_path / "out3"
+    cfg = CrawlConfig(start_urls=[site + "/collection.html"], output_dir=str(out), delay=0,
+                      max_depth=0, streaming_videos=False)
+    Crawler(cfg).run()
+    with open(out / "data" / "images.csv", encoding="utf-8-sig") as fh:
+        rows = {r["alt"]: r for r in csv.DictReader(fh)}
+    lilies = rows["Water Lilies"]
+    assert lilies["url"].endswith("/img/b.png")  # largest srcset candidate
+    assert lilies["heading"] == "Water Lilies, 1906"
+    assert "Oil on canvas" in lilies["context"]
+    assert lilies["local_path"].endswith("b.png") and (out / lilies["local_path"]).exists()
+    assert rows["Bust"]["caption"] == "Marble bust, Roman, 2nd century"
+    md = next((out / "text").rglob("collection.md")).read_text()
+    assert "../../assets/images/" in md  # markdown points at the local image files

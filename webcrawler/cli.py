@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from urllib.parse import urlsplit
 
@@ -63,7 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
                     "links, images, videos, audio, documents and more.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument("urls", nargs="+", help="start URL(s)")
+    p.add_argument("urls", nargs="*", help="start URL(s); leave empty to be asked interactively")
     p.add_argument("-o", "--output", help="output directory (default: downloads/<host>)")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
@@ -133,8 +134,49 @@ def _load_cookies_file(path: str) -> dict:
     return cookies
 
 
+def _ask(prompt: str, default: str = "") -> str:
+    try:
+        v = input(prompt).strip()
+    except EOFError:
+        v = ""
+    return v or default
+
+
+def _interactive(args) -> None:
+    """No URL given (e.g. double-clicked start script): ask for it."""
+    print("=" * 56)
+    print("  webcrawler 整站下载工具")
+    print("=" * 56)
+    url = ""
+    while not url:
+        url = _ask("\n请输入要扒的网址 (URL): ")
+    args.urls = [url]
+    mode = _ask("\n扒取范围:\n  1) 整个网站 (默认)\n  2) 只要这一个页面\n请选择 [1/2]: ", "1")
+    if mode.startswith("2"):
+        args.single_page = True
+    else:
+        n = _ask(f"\n最多扒多少个页面? [默认 {args.max_pages}]: ")
+        if n.isdigit():
+            args.max_pages = int(n)
+    args.open_when_done = True
+    print()
+
+
+def _setup_console() -> None:
+    # Windows consoles / pipes may not be UTF-8; never crash on printing.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv=None) -> int:
+    _setup_console()
     args = build_parser().parse_args(argv)
+    args.open_when_done = False
+    if not args.urls:
+        _interactive(args)
     level = logging.WARNING if args.quiet else (logging.DEBUG if args.verbose > 1 else logging.INFO)
     logging.basicConfig(level=level, format="%(message)s")
     logging.getLogger("urllib3").setLevel(logging.ERROR)
@@ -189,7 +231,13 @@ def main(argv=None) -> int:
             print(f"   {cat:<10} {c['count']:>6}  ({c['bytes'] / 1024 / 1024:.1f} MB)")
         if summary["embedded_videos"]:
             print(f"   embedded videos found: {summary['embedded_videos']}")
-        print(f"\n→ open {summary['output_dir']}/index.html")
+        index = os.path.join(summary["output_dir"], "index.html")
+        print(f"\n→ {index}")
+        if args.open_when_done:
+            import webbrowser
+            from pathlib import Path
+
+            webbrowser.open(Path(index).as_uri())
     return 0
 
 

@@ -216,10 +216,18 @@ _UNSAFE = re.compile(r'[<>:"\\|?*\x00-\x1f]')
 MAX_SEGMENT = 120
 
 
+_WIN_RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)),
+                 *(f"lpt{i}" for i in range(1, 10))}
+MAX_RELPATH = 160  # keep full paths under Windows' 260-char limit
+
+
 def _safe_segment(seg: str) -> str:
-    seg = _UNSAFE.sub("_", unquote(seg)).strip()
+    seg = _UNSAFE.sub("_", unquote(seg)).replace("/", "_").strip()
+    seg = seg.rstrip(". ")  # Windows silently drops trailing dots/spaces
     if seg in ("", ".", ".."):
         seg = "_"
+    if seg.split(".")[0].lower() in _WIN_RESERVED:
+        seg = "_" + seg
     if len(seg.encode("utf-8")) > MAX_SEGMENT:
         root, ext = os.path.splitext(seg)
         digest = hashlib.sha1(seg.encode("utf-8")).hexdigest()[:10]
@@ -256,7 +264,12 @@ def url_to_relpath(url: str, *, page: bool, default_ext: str = "") -> str:
     if parts.query:
         root = f"{root}_{short_hash(parts.query)}"
     segs[-1] = _safe_segment(root + ext)
-    return posixpath.join(host, *segs)
+    rel = posixpath.join(host, *segs)
+    if len(rel) > MAX_RELPATH:
+        # collapse the middle directories into a hash so the path stays short
+        tail = segs[-1]
+        rel = posixpath.join(host, "_long", short_hash(rel, 12), tail)
+    return rel
 
 
 def relative_link(from_file: str, to_file: str) -> str:
